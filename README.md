@@ -1,6 +1,6 @@
-# ComfyuUI SeedVR2 Tiler
+# ComfyUI SeedVR2 Tiler
 
-<img width="512" height="512" alt="Tiler Workflow" src="https://github.com/user-attachments/assets/0753a738-03f1-45ee-8988-05e0c3fa6e18" />
+<img width="512" height="512" alt="Tiler Workflow" src="https://github.com/user-attachments/assets/9c7735db-813c-4bdd-849d-47b594476f12" />
 
 
 A ComfyUI custom node pack for tiling large images through [SeedVR2](https://github.com/TencentARC/SeedVR) with overlap blending. Allows SeedVR2 to upscale images of any size by splitting them into tiles, processing each tile, and seamlessly stitching them back together.
@@ -44,7 +44,8 @@ Load Image → Tile Splitter → tiles ─────────────�
                                             SeedVR2 → Tile Stitcher → Save Image
 ```
 
-<img width="1938" height="664" alt="Screenshot 2026-02-26 185301" src="https://github.com/user-attachments/assets/6c31d0b9-3c76-4a70-8a1b-2e0576d072ff" />
+<img width="1938" height="664" alt="Screenshot 2026-02-26 185301" src="https://github.com/user-attachments/assets/81e5e06f-6899-4250-8e41-0c0ceffcf700" />
+
 
 * Connect resolution to both resolution and max_resolution inputs on SeedVR2
 
@@ -80,6 +81,13 @@ No additional dependencies — uses only PyTorch and standard ComfyUI libraries.
 
 ---
 
+## Support
+If you find this useful, consider buying me a coffee!
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/dbacon/tip)
+
+---
+
 ## Development
 This node pack was developed with the assistance of [Claude](https://claude.ai) (Anthropic). The architecture, design decisions, and testing were directed by the author; the code was written collaboratively with AI. Shared here in the spirit of transparency.
 
@@ -90,3 +98,4 @@ Inspired by tiling approaches in the ComfyUI community, including
 [moonwhaler]([https://github.com/moonwhaler](https://github.com/moonwhaler/comfyui-seedvr2-tilingupscaler)) and the
 [Steudio](https://civitai.com/models/982985/divide-and-conquer-ultimate-upscaling-workflow-for-comfyui) upscaling workflow.
 SeedVR2 itself is by [TencentARC](https://github.com/TencentARC/SeedVR) — this node pack just makes it easier to use on larger images.
+
