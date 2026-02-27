@@ -95,7 +95,8 @@ This node pack was developed with the assistance of [Claude](https://claude.ai) 
 
 ## Acknowledgements
 Inspired by tiling approaches in the ComfyUI community, including
-[moonwhaler]([https://github.com/moonwhaler](https://github.com/moonwhaler/comfyui-seedvr2-tilingupscaler)) and the
+[Moonwhaler](https://github.com/moonwhaler/comfyui-seedvr2-tilingupscaler) and the
 [Steudio](https://civitai.com/models/982985/divide-and-conquer-ultimate-upscaling-workflow-for-comfyui) upscaling workflow.
 SeedVR2 itself is by [TencentARC](https://github.com/TencentARC/SeedVR) — this node pack just makes it easier to use on larger images.
+
 
