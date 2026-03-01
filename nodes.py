@@ -236,8 +236,11 @@ class SeedVR2TileSplitter:
             }
         }
 
-    def split(self, image, tile_size_mp, tile_upscale_mp, overlap_percent, feather_blend):
-        # Normalise to (H, W, C)
+    def _split_core(self, image, tile_size_mp, overlap_percent, feather_blend, upscale_ratio=None, tile_upscale_mp=None):
+        """
+        Core split logic shared by all variant nodes.
+        Provide either upscale_ratio (preferred, uses actual tile dims) or tile_upscale_mp.
+        """
         if image.ndim == 4:
             if image.shape[0] != 1:
                 raise ValueError(
@@ -257,16 +260,13 @@ class SeedVR2TileSplitter:
         stride_w = grid["stride_w"]; stride_h = grid["stride_h"]
         canvas_w = grid["canvas_w"]; canvas_h = grid["canvas_h"]
 
-        # Resize image to exact canvas
         if canvas_w != orig_W or canvas_h != orig_H:
             canvas_img = _resize(img, canvas_h, canvas_w)
         else:
             canvas_img = img
 
-        # Extract tiles (row-major)
         tiles: List[torch.Tensor] = []
         positions: List[Tuple[int, int]] = []
-
         for row in range(rows):
             for col in range(cols):
                 x0 = col * stride_w
@@ -274,15 +274,29 @@ class SeedVR2TileSplitter:
                 tiles.append(canvas_img[y0 : y0 + tile_h, x0 : x0 + tile_w, :])
                 positions.append((x0, y0))
 
-        tiles_tensor = torch.stack(tiles, dim=0)  # (N, tile_h, tile_w, C)
+        tiles_tensor = torch.stack(tiles, dim=0)
 
-        # resolution hint for SeedVR2
-        tile_aspect    = tile_w / tile_h
-        out_h_raw      = math.sqrt(tile_upscale_mp * 1_000_000 / tile_aspect)
-        resolution = _align(max(out_h_raw * tile_aspect, out_h_raw), 8)
+        # Compute resolution hint from actual tile dimensions.
+        # If upscale_ratio provided, derive target tile dims directly — this is
+        # accurate regardless of tile count or tile_size_mp value.
+        # If tile_upscale_mp provided (legacy MP mode), use the old formula.
+        if upscale_ratio is not None:
+            target_tile_w = tile_w * upscale_ratio
+            target_tile_h = tile_h * upscale_ratio
+            resolution = _align(min(target_tile_w, target_tile_h), 8)
+            # Exact target output dimensions for stitcher to hit precisely
+            target_out_w = round(orig_W * upscale_ratio)
+            target_out_h = round(orig_H * upscale_ratio)
+        else:
+            tile_aspect  = tile_w / tile_h
+            out_h_raw    = math.sqrt(tile_upscale_mp * 1_000_000 / tile_aspect)
+            resolution   = _align(min(out_h_raw * tile_aspect, out_h_raw), 8)
+            target_out_w = None
+            target_out_h = None
 
         meta: Dict[str, Any] = {
             "orig_w": orig_W, "orig_h": orig_H, "orig_c": C,
+            "target_out_w": target_out_w, "target_out_h": target_out_h,
             "canvas_w": canvas_w, "canvas_h": canvas_h,
             "cols": cols, "rows": rows, "n_tiles": cols * rows,
             "tile_w": tile_w, "tile_h": tile_h,
@@ -305,6 +319,10 @@ class SeedVR2TileSplitter:
         )
 
         return (tiles_tensor, meta, resolution)
+
+    def split(self, image, tile_size_mp, tile_upscale_mp, overlap_percent, feather_blend):
+        return self._split_core(image, tile_size_mp, overlap_percent, feather_blend,
+                                tile_upscale_mp=tile_upscale_mp)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -418,13 +436,17 @@ class SeedVR2TileStitcher:
 
         result = (canvas / weights.clamp(min=1e-8)).clamp(0.0, 1.0).to(dtype)
 
-        # Crop/resize back to exact original aspect ratio at the effective upscale.
-        # Use geometric mean of x/y scale factors so the output area is consistent,
-        # then derive final_w and final_h directly from orig_w/orig_h — this
-        # guarantees the aspect ratio is pixel-perfect regardless of canvas padding.
-        eff_scale = math.sqrt((out_canvas_w / orig_w) * (out_canvas_h / orig_h))
-        final_w   = round(orig_w * eff_scale)
-        final_h   = round(orig_h * eff_scale)
+        # If the variant nodes stored an exact target size, use it directly.
+        # Otherwise fall back to aspect-ratio-preserving resize from orig dimensions.
+        target_out_w = meta.get("target_out_w")
+        target_out_h = meta.get("target_out_h")
+
+        if target_out_w and target_out_h:
+            final_w, final_h = target_out_w, target_out_h
+        else:
+            eff_scale = math.sqrt((out_canvas_w / orig_w) * (out_canvas_h / orig_h))
+            final_w   = round(orig_w * eff_scale)
+            final_h   = round(orig_h * eff_scale)
 
         if final_w != out_canvas_w or final_h != out_canvas_h:
             result = _resize(result, final_h, final_w)
@@ -435,15 +457,195 @@ class SeedVR2TileStitcher:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Node 3 – Tile Splitter (by Longest Edge)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SeedVR2TileSplitterByLongestEdge(SeedVR2TileSplitter):
+    """
+    Same as Tile Splitter but lets you specify the desired output size as a
+    maximum longest edge in pixels rather than megapixels.
+    tile_upscale_mp is computed automatically from the image aspect ratio.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "tile_size_mp": (
+                    "FLOAT",
+                    {
+                        "default": 1.0, "min": 0.1, "max": 16.0, "step": 0.1,
+                        "display": "number",
+                        "tooltip": "Maximum size of each tile in megapixels. Lower = less VRAM per pass.",
+                    },
+                ),
+                "longest_edge_px": (
+                    "INT",
+                    {
+                        "default": 2048, "min": 64, "max": 16384, "step": 8,
+                        "display": "number",
+                        "tooltip": "Desired pixel length of the longest edge in the final stitched output.",
+                    },
+                ),
+                "overlap_percent": (
+                    "FLOAT",
+                    {
+                        "default": 10.0, "min": 0.0, "max": 40.0, "step": 1.0,
+                        "display": "number",
+                        "tooltip": "Overlap between adjacent tiles as a % of tile size.",
+                    },
+                ),
+                "feather_blend": (
+                    "FLOAT",
+                    {
+                        "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                        "display": "number",
+                        "tooltip": "1.0 = smooth feather blend. 0.0 = hard cut.",
+                    },
+                ),
+            }
+        }
+
+    def split(self, image, tile_size_mp, longest_edge_px, overlap_percent, feather_blend):
+        img = image[0] if image.ndim == 4 else image
+        orig_H, orig_W = img.shape[:2]
+        upscale_ratio  = longest_edge_px / max(orig_W, orig_H)
+        return self._split_core(image, tile_size_mp, overlap_percent, feather_blend,
+                                upscale_ratio=upscale_ratio)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Node 4 – Tile Splitter (by Shortest Edge)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SeedVR2TileSplitterByShortestEdge(SeedVR2TileSplitter):
+    """
+    Same as Tile Splitter but lets you specify the desired output size as a
+    minimum shortest edge in pixels rather than megapixels.
+    tile_upscale_mp is computed automatically from the image aspect ratio.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "tile_size_mp": (
+                    "FLOAT",
+                    {
+                        "default": 1.0, "min": 0.1, "max": 16.0, "step": 0.1,
+                        "display": "number",
+                        "tooltip": "Maximum size of each tile in megapixels. Lower = less VRAM per pass.",
+                    },
+                ),
+                "shortest_edge_px": (
+                    "INT",
+                    {
+                        "default": 2048, "min": 64, "max": 16384, "step": 8,
+                        "display": "number",
+                        "tooltip": "Desired pixel length of the shortest edge in the final stitched output.",
+                    },
+                ),
+                "overlap_percent": (
+                    "FLOAT",
+                    {
+                        "default": 10.0, "min": 0.0, "max": 40.0, "step": 1.0,
+                        "display": "number",
+                        "tooltip": "Overlap between adjacent tiles as a % of tile size.",
+                    },
+                ),
+                "feather_blend": (
+                    "FLOAT",
+                    {
+                        "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                        "display": "number",
+                        "tooltip": "1.0 = smooth feather blend. 0.0 = hard cut.",
+                    },
+                ),
+            }
+        }
+
+    def split(self, image, tile_size_mp, shortest_edge_px, overlap_percent, feather_blend):
+        img = image[0] if image.ndim == 4 else image
+        orig_H, orig_W = img.shape[:2]
+        upscale_ratio  = shortest_edge_px / min(orig_W, orig_H)
+        return self._split_core(image, tile_size_mp, overlap_percent, feather_blend,
+                                upscale_ratio=upscale_ratio)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Node 5 – Tile Splitter (by Upscale Factor)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SeedVR2TileSplitterByFactor(SeedVR2TileSplitter):
+    """
+    Same as Tile Splitter but lets you specify the desired upscale as a
+    simple multiplier (e.g. 2.0 = double the image dimensions).
+    tile_upscale_mp is computed automatically.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "tile_size_mp": (
+                    "FLOAT",
+                    {
+                        "default": 1.0, "min": 0.1, "max": 16.0, "step": 0.1,
+                        "display": "number",
+                        "tooltip": "Maximum size of each tile in megapixels. Lower = less VRAM per pass.",
+                    },
+                ),
+                "upscale_factor": (
+                    "FLOAT",
+                    {
+                        "default": 2.0, "min": 1.0, "max": 16.0, "step": 0.25,
+                        "display": "number",
+                        "tooltip": "Upscale multiplier. 2.0 = double the width and height of the final output.",
+                    },
+                ),
+                "overlap_percent": (
+                    "FLOAT",
+                    {
+                        "default": 10.0, "min": 0.0, "max": 40.0, "step": 1.0,
+                        "display": "number",
+                        "tooltip": "Overlap between adjacent tiles as a % of tile size.",
+                    },
+                ),
+                "feather_blend": (
+                    "FLOAT",
+                    {
+                        "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                        "display": "number",
+                        "tooltip": "1.0 = smooth feather blend. 0.0 = hard cut.",
+                    },
+                ),
+            }
+        }
+
+    def split(self, image, tile_size_mp, upscale_factor, overlap_percent, feather_blend):
+        return self._split_core(image, tile_size_mp, overlap_percent, feather_blend,
+                                upscale_ratio=upscale_factor)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Registration
 # ─────────────────────────────────────────────────────────────────────────────
 
 NODE_CLASS_MAPPINGS = {
-    "SeedVR2TileSplitter":   SeedVR2TileSplitter,
-    "SeedVR2TileStitcher":   SeedVR2TileStitcher,
+    "SeedVR2TileSplitter":                 SeedVR2TileSplitter,
+    "SeedVR2TileStitcher":                 SeedVR2TileStitcher,
+    "SeedVR2TileSplitterByLongestEdge":    SeedVR2TileSplitterByLongestEdge,
+    "SeedVR2TileSplitterByShortestEdge":   SeedVR2TileSplitterByShortestEdge,
+    "SeedVR2TileSplitterByFactor":         SeedVR2TileSplitterByFactor,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "SeedVR2TileSplitter":   "SeedVR2 Tile Splitter",
-    "SeedVR2TileStitcher":   "SeedVR2 Tile Stitcher",
+    "SeedVR2TileSplitter":                 "SeedVR2 Tile Splitter",
+    "SeedVR2TileStitcher":                 "SeedVR2 Tile Stitcher",
+    "SeedVR2TileSplitterByLongestEdge":    "SeedVR2 Tile Splitter (Longest Edge)",
+    "SeedVR2TileSplitterByShortestEdge":   "SeedVR2 Tile Splitter (Shortest Edge)",
+    "SeedVR2TileSplitterByFactor":         "SeedVR2 Tile Splitter (Upscale Factor)",
 }

@@ -24,6 +24,42 @@ Splits an image into a batch of overlapping tiles sized for SeedVR2's resolution
 
 ---
 
+### SeedVR2 Tile Splitter (Longest Edge)
+Same as the standard Tile Splitter but lets you specify your desired output size as a maximum longest edge in pixels. The resolution hint is computed automatically from your image's actual tile dimensions so it stays accurate regardless of tile count.
+
+**Inputs**
+- `image` — source image
+- `tile_size_mp` — maximum tile size in megapixels. Lower = less VRAM per pass
+- `longest_edge_px` — desired pixel length of the longest edge in the final stitched output
+- `overlap_percent` — overlap between adjacent tiles as a percentage (default 10)
+- `feather_blend` — blend width for overlap stitching (0–1)
+
+---
+
+### SeedVR2 Tile Splitter (Shortest Edge)
+Same as the standard Tile Splitter but lets you specify your desired output size as a minimum shortest edge in pixels.
+
+**Inputs**
+- `image` — source image
+- `tile_size_mp` — maximum tile size in megapixels. Lower = less VRAM per pass
+- `shortest_edge_px` — desired pixel length of the shortest edge in the final stitched output
+- `overlap_percent` — overlap between adjacent tiles as a percentage (default 10)
+- `feather_blend` — blend width for overlap stitching (0–1)
+
+---
+
+### SeedVR2 Tile Splitter (Upscale Factor)
+Same as the standard Tile Splitter but lets you specify a simple upscale multiplier instead of megapixels. 2.0 = double the width and height of the final output.
+
+**Inputs**
+- `image` — source image
+- `tile_size_mp` — maximum tile size in megapixels. Lower = less VRAM per pass
+- `upscale_factor` — upscale multiplier (e.g. 2.0 = 2× output, 1.5 = 1.5× output)
+- `overlap_percent` — overlap between adjacent tiles as a percentage (default 10)
+- `feather_blend` — blend width for overlap stitching (0–1)
+
+---
+
 ### SeedVR2 Tile Stitcher
 Reassembles the upscaled tile batch back into a single image using feathered blending over the overlap regions. The output is resized to preserve the exact aspect ratio of the original image.
 
@@ -98,5 +134,3 @@ Inspired by tiling approaches in the ComfyUI community, including
 [Moonwhaler](https://github.com/moonwhaler/comfyui-seedvr2-tilingupscaler) and the
 [Steudio](https://civitai.com/models/982985/divide-and-conquer-ultimate-upscaling-workflow-for-comfyui) upscaling workflow.
 SeedVR2 itself is by [TencentARC](https://github.com/TencentARC/SeedVR) — this node pack just makes it easier to use on larger images.
-
-
