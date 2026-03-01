@@ -1,6 +1,7 @@
 # ComfyUI SeedVR2 Tiler
 
-<img width="512" height="512" alt="Tiler Workflow" src="https://github.com/user-attachments/assets/9c7735db-813c-4bdd-849d-47b594476f12" />
+<img width="512" height="512" alt="SeedVR2 Tiler Workflow" src="https://github.com/user-attachments/assets/720b97f1-f705-470b-b5da-442a4c95e610" />
+
 
 
 A ComfyUI custom node pack for tiling large images through [SeedVR2](https://github.com/TencentARC/SeedVR) with overlap blending. Allows SeedVR2 to upscale images of any size by splitting them into tiles, processing each tile, and seamlessly stitching them back together.
@@ -80,7 +81,7 @@ Load Image → Tile Splitter → tiles ─────────────�
                                             SeedVR2 → Tile Stitcher → Save Image
 ```
 
-<img width="1938" height="664" alt="Screenshot 2026-02-26 185301" src="https://github.com/user-attachments/assets/81e5e06f-6899-4250-8e41-0c0ceffcf700" />
+<img width="2240" height="954" alt="Workflow" src="https://github.com/user-attachments/assets/249a5b81-6a1d-4ae2-ac68-e6b4f437363c" />
 
 
 * Connect resolution to both resolution and max_resolution inputs on SeedVR2
