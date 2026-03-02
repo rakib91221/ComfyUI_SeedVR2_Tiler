@@ -84,7 +84,7 @@ Load Image → Tile Splitter → tiles ─────────────�
 <img width="2240" height="954" alt="Workflow" src="https://github.com/user-attachments/assets/249a5b81-6a1d-4ae2-ac68-e6b4f437363c" />
 
 
-* Connect resolution to both resolution and max_resolution inputs on SeedVR2
+* Connect resolution to resolution and set max_resolution to 0. You can set a max resolution to further prevent OOM, but the nodes should help do this regardless
 
 For **multi-pass upscaling**, run the pipeline multiple times feeding the output back as input. Each pass progressively increases resolution.
 
